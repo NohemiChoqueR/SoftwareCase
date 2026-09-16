@@ -1,0 +1,33 @@
+# Entorno virtual de Python
+backend/venv/
+venv/
+ENV/
+
+# Archivos de caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Base de datos local de desarrollo (si usas SQLite)
+*.sqlite3
+
+# Archivos estáticos y de medios recolectados
+staticfiles/
+media/
+
+# Archivos de configuración del sistema o del editor
+.vscode/
+.idea/
+.DS_Store
+
+
+
+
+# Django
+*.log
+
+
+
+# Variables de entorno
+.env
+
