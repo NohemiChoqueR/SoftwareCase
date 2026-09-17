@@ -17,9 +17,6 @@ PERMISSIONS = [
     ('VIEW_HISTORY', 'Ver historial'), # Oculto en la UI temporalmente
 ]
 
-class Role(models.fields.Field):
-    pass # Solo para evitar un error sintactico al reestructurar
-
 class Role(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
