@@ -31,3 +31,12 @@ media/
 # Variables de entorno
 .env
 
+# Node / Frontend
+frontend/node_modules/
+node_modules/
+frontend/dist/
+dist/
+*.tsbuildinfo
+
+.agents/
+skills-lock.json
