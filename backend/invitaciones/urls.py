@@ -1,14 +1,10 @@
-from django.urls import path
-from .views import (
-    PublicInvitationDetailView,
-    AcceptInvitationView,
-    RejectInvitationView,
-    CancelInvitationView,
-)
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import InvitationViewSet
+
+router = DefaultRouter()
+router.register(r'', InvitationViewSet, basename='invitations')
 
 urlpatterns = [
-    path('<uuid:token>/', PublicInvitationDetailView.as_view(), name='invitation-detail'),
-    path('<uuid:token>/aceptar/', AcceptInvitationView.as_view(), name='invitation-accept'),
-    path('<uuid:token>/rechazar/', RejectInvitationView.as_view(), name='invitation-reject'),
-    path('<uuid:token>/cancelar/', CancelInvitationView.as_view(), name='invitation-cancel'),
+    path('', include(router.urls)),
 ]

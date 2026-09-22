@@ -1,0 +1,40 @@
+databases:
+  - name: softwarecase-db
+    databaseName: case_db
+    user: case_admin
+    plan: free
+
+services:
+  # Backend ASGI (Django + Channels + Daphne para HTTP y WebSockets)
+  - type: web
+    name: softwarecase-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: "./build.sh"
+    startCommand: "daphne -b 0.0.0.0 -p $PORT case_backend.asgi:application"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: softwarecase-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "False"
+      - key: ALLOWED_HOSTS
+        value: "*"
+      - key: PYTHON_VERSION
+        value: 3.11.9
+
+  # Frontend SPA (React + Vite)
+  - type: web
+    name: softwarecase-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: "npm install && npm run build"
+    staticPublishPath: "./dist"
+    routes:
+      - type: rewrite
+        source: "/*"
+        destination: "/index.html"

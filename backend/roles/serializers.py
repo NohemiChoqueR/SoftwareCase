@@ -6,25 +6,38 @@ class PermissionSerializer(serializers.Serializer):
     name = serializers.CharField()
 
 class RoleSerializer(serializers.ModelSerializer):
-    permissions = serializers.SlugRelatedField(
-        many=True,
-        slug_field='permission',
-        queryset=RolePermission.objects.none() # It's read-only for now, but we override create/update
-    )
-    
-    # Accept a list of string permissions on write
-    permissions_list = serializers.ListField(
+    permissions = serializers.ListField(
         child=serializers.ChoiceField(choices=[p[0] for p in PERMISSIONS]),
+        required=False,
         write_only=True
     )
 
     class Meta:
         model = Role
-        fields = ('id', 'name', 'description', 'permissions', 'permissions_list', 'created_at')
-        read_only_fields = ('id', 'permissions', 'created_at')
+        fields = ('id', 'name', 'description', 'permissions', 'created_at')
+        read_only_fields = ('id', 'created_at')
+
+    def validate(self, attrs):
+        user = self.context['request'].user
+        name = attrs.get('name')
+        
+        if name:
+            qs = Role.objects.filter(name=name, user=user)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({"name": "Ya tienes un rol con este nombre."})
+        
+        return attrs
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        # instance.permissions es el RelatedManager hacia RolePermission
+        ret['permissions'] = [rp.permission for rp in instance.permissions.all()]
+        return ret
 
     def create(self, validated_data):
-        permissions_data = validated_data.pop('permissions_list', [])
+        permissions_data = validated_data.pop('permissions', [])
         user = self.context['request'].user
         role = Role.objects.create(user=user, **validated_data)
         
@@ -34,7 +47,7 @@ class RoleSerializer(serializers.ModelSerializer):
         return role
 
     def update(self, instance, validated_data):
-        permissions_data = validated_data.pop('permissions_list', None)
+        permissions_data = validated_data.pop('permissions', None)
         
         instance.name = validated_data.get('name', instance.name)
         instance.description = validated_data.get('description', instance.description)

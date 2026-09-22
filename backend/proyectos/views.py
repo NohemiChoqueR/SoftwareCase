@@ -1,4 +1,6 @@
 from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
 from django.db.models import Q
@@ -20,6 +22,17 @@ class ProjectViewSet(viewsets.ModelViewSet):
         if instance.owner != self.request.user:
             raise PermissionDenied("Solo el propietario del proyecto puede eliminarlo.")
         instance.delete()
+
+    @action(detail=True, methods=['get'])
+    def invitaciones(self, request, pk=None):
+        project = self.get_object()
+        if project.owner != request.user:
+            raise PermissionDenied("Solo el propietario puede ver las invitaciones del proyecto.")
+        from invitaciones.models import Invitation
+        from invitaciones.serializers import InvitationSerializer
+        invitations = Invitation.objects.filter(project=project)
+        serializer = InvitationSerializer(invitations, many=True)
+        return Response(serializer.data)
 
 
 class CollaboratorViewSet(viewsets.ReadOnlyModelViewSet):
