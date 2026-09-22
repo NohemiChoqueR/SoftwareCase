@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useId } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import type { Project, Collaborator, Invitation, Role } from '../types';
+import type { Project, Collaborator, Invitation, Role, Diagram } from '../types';
 import { Modal } from '../components/Modal';
 import {
   ArrowLeft,
@@ -11,15 +11,35 @@ import {
   Users,
   Mail,
   Plus,
-  Copy,
-  Check,
   Ban,
   Loader2,
   AlertCircle,
   Clock,
+  CheckCircle2,
+  Circle,
+  Check,
   Sparkles,
   Layers,
+  Trash2,
+  Box,
 } from 'lucide-react';
+
+const PERMISSION_LABELS: Record<string, string> = {
+  VIEW_PROJECT: 'Ver proyecto',
+  EDIT_PROJECT: 'Editar proyecto',
+  DELETE_PROJECT: 'Eliminar proyecto',
+  INVITE_COLLABORATOR: 'Invitar colaboradores',
+  REMOVE_COLLABORATOR: 'Gestionar colaboradores',
+  MANAGE_ROLES: 'Gestionar configuración',
+  VIEW_MODEL: 'Ver modelos de datos',
+  EDIT_MODEL: 'Editar modelos de datos',
+  VALIDATE_MODEL: 'Validar modelos',
+  USE_AI: 'Usar Inteligencia Artificial',
+  GENERATE_CODE: 'Generar código base',
+  GENERATE_BACKEND: 'Generar backend',
+  EXPORT_MODEL: 'Exportar modelos',
+  IMPORT_MODEL: 'Importar modelos',
+};
 
 export const ProjectDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -33,17 +53,25 @@ export const ProjectDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Diagrams state
+  const [diagrams, setDiagrams] = useState<Diagram[]>([]);
+  const [isCreateDiagOpen, setIsCreateDiagOpen] = useState(false);
+  const [diagName, setDiagName] = useState('');
+  const [diagDesc, setDiagDesc] = useState('');
+  const [diagSubmitting, setDiagSubmitting] = useState(false);
+  const [diagError, setDiagError] = useState<string | null>(null);
+  const [diagToDelete, setDiagToDelete] = useState<Diagram | null>(null);
+  const [diagDeleteSubmitting, setDiagDeleteSubmitting] = useState(false);
+
   // Invite modal state
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [selectedRoleId, setSelectedRoleId] = useState<number | ''>('');
-  const [expiresInDays, setExpiresInDays] = useState(7);
+  const [guestEmail, setGuestEmail] = useState('');
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
-  const [generatedLink, setGeneratedLink] = useState<string | null>(null);
-  const [copiedLink, setCopiedLink] = useState(false);
+  const [showPermissions, setShowPermissions] = useState(false);
 
-  const roleSelectId = useId();
-  const expiresInputId = useId();
+  const emailInputId = useId();
 
   const isOwner = project?.owner === user?.id;
 
@@ -67,6 +95,14 @@ export const ProjectDetail: React.FC = () => {
         setSelectedRoleId(rolesRes.data[0].id);
       }
 
+      // Cargar diagramas del proyecto
+      try {
+        const diagRes = await api.get<Diagram[]>(`/proyectos/${id}/diagramas/`);
+        setDiagrams(diagRes.data);
+      } catch {
+        // Ignorar si no tiene permiso VIEW_MODEL
+      }
+
       if (projRes.data.owner === user?.id) {
         try {
           const invRes = await api.get<Invitation[]>(`/proyectos/${id}/invitaciones/`);
@@ -88,54 +124,87 @@ export const ProjectDetail: React.FC = () => {
 
   const handleCreateInvitation = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedRoleId) {
-      setInviteError('Por favor selecciona un rol para la invitación.');
+    if (!selectedRoleId || !guestEmail) {
+      setInviteError('Por favor selecciona un rol e ingresa un correo válido.');
       return;
     }
 
     try {
       setInviteSubmitting(true);
       setInviteError(null);
-      const res = await api.post<{ token: string; invitation_url?: string }>(
-        `/proyectos/${id}/invitaciones/`,
-        {
-          role_id: Number(selectedRoleId),
-          expires_in_days: expiresInDays,
-        }
-      );
+      await api.post(`/invitaciones/`, {
+        project: id,
+        role: Number(selectedRoleId),
+        guest_email: guestEmail,
+      });
 
-      const token = res.data.token;
-      const fullUrl = `${window.location.origin}/invitaciones/${token}`;
-      setGeneratedLink(fullUrl);
-
+      // Recargar lista de invitaciones
       const invRes = await api.get<Invitation[]>(`/proyectos/${id}/invitaciones/`);
       setInvitations(invRes.data);
-    } catch {
-      setInviteError('Error al generar la invitación. Verifica los datos.');
+      
+      setIsInviteOpen(false);
+      setGuestEmail('');
+    } catch (err: any) {
+      if (err.response?.data?.guest_email) {
+        setInviteError(err.response.data.guest_email[0] || err.response.data.guest_email);
+      } else if (err.response?.data?.project) {
+        setInviteError(err.response.data.project[0] || err.response.data.project);
+      } else {
+        setInviteError('Error al enviar la invitación. Verifica los datos.');
+      }
     } finally {
       setInviteSubmitting(false);
     }
   };
 
-  const handleCopyLink = async () => {
-    if (!generatedLink) return;
+  const handleCancelInvitation = async (invId: number) => {
     try {
-      await navigator.clipboard.writeText(generatedLink);
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2500);
-    } catch {
-      // Fallback
-    }
-  };
-
-  const handleCancelInvitation = async (token: string) => {
-    try {
-      await api.post(`/invitaciones/${token}/cancelar/`);
+      await api.delete(`/invitaciones/${invId}/`);
       setInvitations((prev) =>
-        prev.map((inv) => (inv.token === token ? { ...inv, status: 'CANCELADA' } : inv))
+        prev.filter((inv) => inv.id !== invId)
       );
     } catch {
       setError('No se pudo cancelar la invitación.');
+    }
+  };
+
+  const handleCreateDiagram = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!diagName.trim()) {
+      setDiagError('El nombre del diagrama es obligatorio.');
+      return;
+    }
+
+    try {
+      setDiagSubmitting(true);
+      setDiagError(null);
+      const res = await api.post<Diagram>(`/proyectos/${id}/diagramas/`, {
+        name: diagName.trim(),
+        description: diagDesc.trim(),
+      });
+      setDiagrams((prev) => [res.data, ...prev]);
+      setIsCreateDiagOpen(false);
+      setDiagName('');
+      setDiagDesc('');
+      navigate(`/proyectos/${id}/diagramas/${res.data.id}`);
+    } catch {
+      setDiagError('Error al crear el diagrama. Verifica los permisos.');
+    } finally {
+      setDiagSubmitting(false);
+    }
+  };
+
+  const handleDeleteDiagram = async () => {
+    if (!diagToDelete) return;
+    try {
+      setDiagDeleteSubmitting(true);
+      await api.delete(`/diagramas/${diagToDelete.id}/`);
+      setDiagrams((prev) => prev.filter((d) => d.id !== diagToDelete.id));
+      setDiagToDelete(null);
+    } catch {
+      setError('No se pudo eliminar el diagrama.');
+    } finally {
+      setDiagDeleteSubmitting(false);
     }
   };
 
@@ -223,8 +292,9 @@ export const ProjectDetail: React.FC = () => {
               type="button"
               className="btn btn-primary"
               onClick={() => {
-                setGeneratedLink(null);
+                setGuestEmail('');
                 setInviteError(null);
+                setShowPermissions(false);
                 setIsInviteOpen(true);
               }}
             >
@@ -261,46 +331,174 @@ export const ProjectDetail: React.FC = () => {
         </div>
       </div>
 
-      {/* UML Canvas Workspace Banner */}
-      <div
-        className="card"
-        style={{
-          marginBottom: '28px',
-          padding: '40px 24px',
-          textAlign: 'center',
-          backgroundColor: 'var(--bg-container)',
-          border: '1px dashed var(--secondary-border)',
-        }}
-      >
+      {/* UML Diagrams Section */}
+      <div className="card" style={{ marginBottom: '28px', padding: '24px' }}>
         <div
           style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '12px',
-            backgroundColor: 'var(--primary-subtle)',
-            color: 'var(--primary-hover)',
-            display: 'inline-flex',
+            display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: '16px',
-            border: '1px solid var(--secondary-border)',
+            justifyContent: 'space-between',
+            marginBottom: '20px',
+            paddingBottom: '14px',
+            borderBottom: '1px solid var(--secondary-border-subtle)',
+            flexWrap: 'wrap',
+            gap: '12px',
           }}
         >
-          <Layers size={30} aria-hidden="true" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Layers size={20} style={{ color: 'var(--primary-hover)' }} aria-hidden="true" />
+            <h2 style={{ fontSize: '1.2rem', margin: 0 }}>Diagramas UML 2.5</h2>
+            <span className="badge badge-primary tabular-nums">
+              {diagrams.length}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => {
+              setDiagError(null);
+              setIsCreateDiagOpen(true);
+            }}
+            style={{ padding: '8px 16px', fontSize: '0.86rem' }}
+          >
+            <Plus size={16} aria-hidden="true" />
+            <span>Nuevo Diagrama</span>
+          </button>
         </div>
-        <h2 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>Lienzo de Modelado UML 2.5</h2>
-        <p style={{ maxWidth: '540px', margin: '0 auto 24px auto', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-          Espacio colaborativo de diseño para diagramas de clases, paquetes y componentes
-          sincronizado con este proyecto.
-        </p>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => alert('El editor de diagramas interactivo se activará en el módulo correspondiente.')}
-        >
-          <Sparkles size={16} aria-hidden="true" />
-          <span>Iniciar Espacio de Modelado</span>
-        </button>
+
+        {diagrams.length === 0 ? (
+          <div
+            style={{
+              padding: '36px 20px',
+              textAlign: 'center',
+              backgroundColor: 'var(--bg-input)',
+              border: '1px dashed var(--secondary-border)',
+              borderRadius: 'var(--radius-control)',
+            }}
+          >
+            <Box size={36} style={{ color: 'var(--text-muted)', margin: '0 auto 12px auto' }} aria-hidden="true" />
+            <h3 style={{ fontSize: '1rem', color: 'var(--text-primary)', marginBottom: '6px' }}>
+              Aún no hay diagramas en este proyecto
+            </h3>
+            <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', maxWidth: '460px', margin: '0 auto 16px auto' }}>
+              Crea tu primer diagrama de clases UML 2.5 para modelar la arquitectura y comenzar a diseñar.
+            </p>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setDiagError(null);
+                setIsCreateDiagOpen(true);
+              }}
+              style={{ fontSize: '0.84rem' }}
+            >
+              <Plus size={15} aria-hidden="true" />
+              <span>Crear Primer Diagrama</span>
+            </button>
+          </div>
+        ) : (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+              gap: '16px',
+            }}
+          >
+            {diagrams.map((diag) => (
+              <div
+                key={diag.id}
+                className="card card-hover"
+                style={{
+                  padding: '18px 20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  backgroundColor: 'var(--bg-elevated)',
+                  border: '1px solid var(--secondary-border)',
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                      <div
+                        style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '8px',
+                          backgroundColor: 'rgba(124, 92, 252, 0.16)',
+                          color: 'var(--primary-hover)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Box size={16} aria-hidden="true" />
+                      </div>
+                      <h3 className="truncate" style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+                        {diag.name}
+                      </h3>
+                    </div>
+
+                    <span className="badge badge-primary tabular-nums" style={{ fontSize: '0.70rem' }}>
+                      v{diag.version}
+                    </span>
+                  </div>
+
+                  <p className="truncate" style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '0 0 14px 0' }}>
+                    {diag.description || 'Diagrama de clases UML 2.5'}
+                  </p>
+                </div>
+
+                <div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '14px',
+                      fontSize: '0.76rem',
+                      color: 'var(--text-muted)',
+                      paddingTop: '10px',
+                      borderTop: '1px solid var(--secondary-border-subtle)',
+                      marginBottom: '14px',
+                    }}
+                  >
+                    <span className="tabular-nums" style={{ color: 'var(--accent-purple)' }}>
+                      {diag.class_count || 0} clases
+                    </span>
+                    <span>•</span>
+                    <span className="tabular-nums" style={{ color: 'var(--accent-green)' }}>
+                      {diag.relationship_count || 0} relaciones
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => navigate(`/proyectos/${id}/diagramas/${diag.id}`)}
+                      style={{ flex: 1, padding: '8px 12px', fontSize: '0.84rem' }}
+                    >
+                      <Sparkles size={14} aria-hidden="true" />
+                      <span>Abrir Editor</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      onClick={() => setDiagToDelete(diag)}
+                      title="Eliminar diagrama"
+                      style={{ padding: '8px', color: 'var(--error)' }}
+                    >
+                      <Trash2 size={16} aria-hidden="true" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Grid: Colaboradores & Invitaciones */}
@@ -451,14 +649,12 @@ export const ProjectDetail: React.FC = () => {
               </p>
             ) : (
               invitations.map((inv) => {
-                const isPending = inv.status === 'PENDIENTE' && !inv.is_expired;
+                const isPending = inv.status === 'PENDING';
                 const badgeClass =
-                  inv.status === 'ACEPTADA'
+                  inv.status === 'ACCEPTED'
                     ? 'badge-success'
-                    : inv.status === 'CANCELADA' || inv.status === 'RECHAZADA'
+                    : inv.status === 'REJECTED'
                     ? 'badge-error'
-                    : inv.is_expired
-                    ? 'badge-neutral'
                     : 'badge-primary';
 
                 return (
@@ -478,11 +674,11 @@ export const ProjectDetail: React.FC = () => {
                   >
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                        <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                          Rol: {inv.role_name}
+                        <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                          {inv.guest_email}
                         </span>
                         <span className={`badge ${badgeClass}`}>
-                          {inv.is_expired && inv.status === 'PENDIENTE' ? 'Expirada' : inv.status}
+                          {inv.status}
                         </span>
                       </div>
                       <div
@@ -496,41 +692,25 @@ export const ProjectDetail: React.FC = () => {
                       >
                         <Clock size={13} aria-hidden="true" />
                         <span className="tabular-nums">
-                          Expira: {new Date(inv.expires_at).toLocaleDateString('es-ES')}
+                          Enviada el {new Date(inv.created_at).toLocaleDateString('es-ES')}
                         </span>
+                        <span style={{ margin: '0 4px' }}>•</span>
+                        <span>Rol: {inv.role_name}</span>
                       </div>
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       {isPending && (
-                        <>
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            style={{ padding: '6px 10px', fontSize: '0.78rem' }}
-                            onClick={() => {
-                              const link = `${window.location.origin}/invitaciones/${inv.token}`;
-                              void navigator.clipboard.writeText(link);
-                              alert('Enlace copiado al portapapeles.');
-                            }}
-                            title="Copiar enlace de invitación"
-                            aria-label={`Copiar enlace de invitación para rol ${inv.role_name}`}
-                          >
-                            <Copy size={14} aria-hidden="true" />
-                            <span>Copiar</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            className="btn btn-danger"
-                            style={{ padding: '6px 8px' }}
-                            onClick={() => handleCancelInvitation(inv.token)}
-                            title="Cancelar invitación"
-                            aria-label={`Cancelar invitación para rol ${inv.role_name}`}
-                          >
-                            <Ban size={14} aria-hidden="true" />
-                          </button>
-                        </>
+                        <button
+                          type="button"
+                          className="btn btn-danger"
+                          style={{ padding: '6px 8px' }}
+                          onClick={() => handleCancelInvitation(inv.id)}
+                          title="Cancelar invitación"
+                          aria-label={`Cancelar invitación para ${inv.guest_email}`}
+                        >
+                          <Ban size={14} aria-hidden="true" />
+                        </button>
                       )}
                     </div>
                   </div>
@@ -547,122 +727,331 @@ export const ProjectDetail: React.FC = () => {
         onClose={() => {
           if (!inviteSubmitting) setIsInviteOpen(false);
         }}
-        title="Generar Invitación al Proyecto"
+        title="Invitar Colaborador"
       >
-        {generatedLink ? (
-          <div>
-            <div className="alert alert-success" role="alert" aria-live="polite">
-              <Check size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
-              <span>¡Enlace generado exitosamente! Comparte este enlace con tu colega:</span>
+        <form onSubmit={handleCreateInvitation} noValidate>
+          {inviteError && (
+            <div className="alert alert-error" role="alert" aria-live="polite" style={{ marginBottom: '16px' }}>
+              <AlertCircle size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
+              <span>{inviteError}</span>
             </div>
+          )}
 
-            <div className="form-group" style={{ marginBottom: '22px' }}>
-              <label className="form-label" htmlFor="invitation-link-input">
-                Enlace de Acceso
-              </label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <input
-                  id="invitation-link-input"
-                  type="text"
-                  className="form-input"
-                  readOnly
-                  value={generatedLink}
-                  style={{ backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
-                />
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={handleCopyLink}
-                  aria-label="Copiar enlace al portapapeles"
-                >
-                  {copiedLink ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
-                  <span>{copiedLink ? '¡Copiado!' : 'Copiar'}</span>
-                </button>
-              </div>
-            </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor={emailInputId}>
+              Correo electrónico
+            </label>
+            <input
+              id={emailInputId}
+              type="email"
+              className="form-input"
+              value={guestEmail}
+              onChange={(e) => setGuestEmail(e.target.value)}
+              placeholder="ejemplo@correo.com"
+              required
+              disabled={inviteSubmitting}
+            />
+          </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setIsInviteOpen(false)}
-              >
-                Cerrar
-              </button>
+          <div className="form-group" style={{ marginBottom: '24px' }}>
+            <label className="form-label" style={{ marginBottom: '8px', display: 'block', color: 'var(--text-secondary)' }}>
+              Perfil de acceso
+            </label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+              {roles.map((r) => {
+                const isSelected = selectedRoleId === r.id;
+                return (
+                  <div
+                    key={r.id}
+                    onClick={() => {
+                      if (!inviteSubmitting) setSelectedRoleId(r.id);
+                    }}
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: 'var(--radius-control)',
+                      border: isSelected ? '1px solid var(--primary)' : '1px solid var(--secondary-border-subtle)',
+                      backgroundColor: isSelected ? 'rgba(124, 92, 252, 0.08)' : 'var(--bg-input)',
+                      cursor: inviteSubmitting ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      transition: 'all 0.2s cubic-bezier(0.23, 1, 0.32, 1)',
+                      opacity: inviteSubmitting ? 0.6 : 1,
+                      transform: isSelected ? 'scale(1)' : 'scale(0.99)',
+                    }}
+                  >
+                    <div>
+                      <h4 style={{ 
+                        margin: '0 0 2px 0', 
+                        fontSize: isSelected ? '0.9rem' : '0.85rem', 
+                        fontWeight: isSelected ? 600 : 400,
+                        color: isSelected ? '#FFFFFF' : 'var(--text-primary)',
+                        transition: 'all 0.2s'
+                      }}>
+                        {r.name}
+                      </h4>
+                      <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        {r.permissions.length} permisos incluidos
+                      </p>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                      {isSelected ? (
+                        <CheckCircle2 size={18} style={{ color: 'var(--primary)' }} />
+                      ) : (
+                        <Circle size={18} style={{ color: 'var(--text-muted)', opacity: 0.4 }} />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-        ) : (
-          <form onSubmit={handleCreateInvitation} noValidate>
-            {inviteError && (
-              <div className="alert alert-error" role="alert" aria-live="polite">
-                <AlertCircle size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
-                <span>{inviteError}</span>
+
+          <div
+            style={{
+              padding: '14px 16px',
+              borderRadius: 'var(--radius-control)',
+              border: '1px solid var(--secondary-border-subtle)',
+              backgroundColor: 'var(--bg-elevated)',
+              marginBottom: '24px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <h4 style={{ margin: '0 0 2px 0', fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-primary)' }}>
+                  Ver permisos
+                </h4>
+                <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  {roles.find(r => r.id === selectedRoleId)?.permissions.length || 0} permisos incluidos en el rol seleccionado
+                </p>
               </div>
-            )}
-
-            <div className="form-group">
-              <label className="form-label" htmlFor={roleSelectId}>
-                Rol Asignado
-              </label>
-              <select
-                id={roleSelectId}
-                className="form-select"
-                value={selectedRoleId}
-                onChange={(e) => setSelectedRoleId(Number(e.target.value))}
-                required
-                disabled={inviteSubmitting}
-              >
-                {roles.map((r) => (
-                  <option key={r.id} value={r.id} style={{ backgroundColor: 'var(--bg-container)' }}>
-                    {r.name} ({r.permissions.length} permisos)
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group" style={{ marginBottom: '24px' }}>
-              <label className="form-label" htmlFor={expiresInputId}>
-                Vigencia del enlace (días)
-              </label>
-              <input
-                id={expiresInputId}
-                type="number"
-                min={1}
-                max={60}
-                className="form-input tabular-nums"
-                value={expiresInDays}
-                onChange={(e) => setExpiresInDays(Math.max(1, Math.min(60, Number(e.target.value))))}
-                required
-                disabled={inviteSubmitting}
-              />
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button
                 type="button"
-                className="btn btn-secondary"
-                onClick={() => setIsInviteOpen(false)}
-                disabled={inviteSubmitting}
+                role="switch"
+                aria-checked={showPermissions}
+                onClick={() => setShowPermissions(!showPermissions)}
+                style={{
+                  width: '36px',
+                  height: '20px',
+                  borderRadius: '10px',
+                  backgroundColor: showPermissions ? 'var(--primary)' : 'var(--bg-input)',
+                  border: '1px solid var(--secondary-border)',
+                  position: 'relative',
+                  cursor: 'pointer',
+                  transition: 'background-color 0.2s cubic-bezier(0.23, 1, 0.32, 1)',
+                  padding: 0,
+                }}
               >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={inviteSubmitting}
-              >
-                {inviteSubmitting ? (
-                  <>
-                    <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-                    <span>Generando enlace…</span>
-                  </>
-                ) : (
-                  'Generar Enlace'
-                )}
+                <div
+                  style={{
+                    width: '14px',
+                    height: '14px',
+                    borderRadius: '50%',
+                    backgroundColor: '#fff',
+                    position: 'absolute',
+                    top: '2px',
+                    left: showPermissions ? '18px' : '2px',
+                    transition: 'left 0.2s cubic-bezier(0.23, 1, 0.32, 1)',
+                  }}
+                />
               </button>
             </div>
-          </form>
-        )}
+
+            {showPermissions && selectedRoleId && (
+              <div style={{ 
+                marginTop: '14px', 
+                paddingTop: '14px',
+                borderTop: '1px solid var(--secondary-border-subtle)',
+                display: 'grid', 
+                gridTemplateColumns: '1fr 1fr', 
+                gap: '8px 12px',
+                maxHeight: '120px',
+                overflowY: 'auto',
+                paddingRight: '4px'
+              }}>
+                {roles.find(r => r.id === selectedRoleId)?.permissions.map((permCode, idx) => (
+                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div
+                      style={{
+                        width: '14px',
+                        height: '14px',
+                        borderRadius: '50%',
+                        backgroundColor: 'rgba(74, 222, 128, 0.15)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Check size={10} style={{ color: 'var(--accent-green)' }} strokeWidth={3} />
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 400 }}>
+                      {PERMISSION_LABELS[permCode] || permCode}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'flex-end', 
+            gap: '10px',
+            position: 'sticky',
+            bottom: 0,
+            paddingTop: '16px',
+            backgroundColor: 'var(--bg-container)',
+            borderTop: '1px solid var(--secondary-border-subtle)',
+            marginTop: 'auto'
+          }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setIsInviteOpen(false)}
+              disabled={inviteSubmitting}
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={inviteSubmitting}
+            >
+              {inviteSubmitting ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                  <span>Enviando…</span>
+                </>
+              ) : (
+                <>
+                  <Plus size={16} />
+                  <span>Enviar invitación</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Crear Diagrama */}
+      <Modal
+        isOpen={isCreateDiagOpen}
+        onClose={() => {
+          if (!diagSubmitting) setIsCreateDiagOpen(false);
+        }}
+        title="Crear Nuevo Diagrama UML"
+      >
+        <form onSubmit={handleCreateDiagram} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {diagError && (
+            <div className="alert alert-error">
+              <AlertCircle size={16} aria-hidden="true" />
+              <span>{diagError}</span>
+            </div>
+          )}
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+              Nombre del Diagrama
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. Diagrama de Clases del Dominio…"
+              value={diagName}
+              onChange={(e) => setDiagName(e.target.value)}
+              className="form-input"
+              autoFocus
+              required
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+              Descripción (Opcional)
+            </label>
+            <textarea
+              placeholder="Detalle o propósito de este diagrama…"
+              value={diagDesc}
+              onChange={(e) => setDiagDesc(e.target.value)}
+              className="form-input"
+              rows={3}
+              style={{ resize: 'vertical' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', paddingTop: '12px', borderTop: '1px solid var(--secondary-border-subtle)' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setIsCreateDiagOpen(false)}
+              disabled={diagSubmitting}
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={diagSubmitting}
+            >
+              {diagSubmitting ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                  <span>Creando…</span>
+                </>
+              ) : (
+                <>
+                  <Plus size={16} aria-hidden="true" />
+                  <span>Crear y Abrir Editor</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Confirmar Eliminación de Diagrama */}
+      <Modal
+        isOpen={!!diagToDelete}
+        onClose={() => {
+          if (!diagDeleteSubmitting) setDiagToDelete(null);
+        }}
+        title="Eliminar Diagrama UML"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', margin: 0 }}>
+            ¿Estás seguro de que deseas eliminar el diagrama{' '}
+            <strong style={{ color: 'var(--text-primary)' }}>"{diagToDelete?.name}"</strong>? Esta
+            acción eliminará todas sus clases, relaciones y disposición gráfica de forma permanente.
+          </p>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', paddingTop: '12px', borderTop: '1px solid var(--secondary-border-subtle)' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setDiagToDelete(null)}
+              disabled={diagDeleteSubmitting}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="btn btn-danger"
+              onClick={handleDeleteDiagram}
+              disabled={diagDeleteSubmitting}
+            >
+              {diagDeleteSubmitting ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                  <span>Eliminando…</span>
+                </>
+              ) : (
+                <>
+                  <Trash2 size={16} aria-hidden="true" />
+                  <span>Eliminar Diagrama</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

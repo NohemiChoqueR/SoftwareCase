@@ -94,7 +94,7 @@ export const Roles: React.FC = () => {
       const payload = {
         name: roleName.trim(),
         description: roleDescription.trim(),
-        permissions_list: selectedPermissions,
+        permissions: selectedPermissions,
       };
 
       if (editingRole) {

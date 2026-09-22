@@ -11,7 +11,8 @@ const Projects = lazy(() => import('./pages/Projects'));
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
 const Roles = lazy(() => import('./pages/Roles'));
 const Profile = lazy(() => import('./pages/Profile'));
-const InvitationAccept = lazy(() => import('./pages/InvitationAccept'));
+const Invitations = lazy(() => import('./pages/Invitations'));
+const DiagramEditor = lazy(() => import('./pages/DiagramEditor'));
 
 const PageLoader: React.FC = () => (
   <div
@@ -30,7 +31,10 @@ const PageLoader: React.FC = () => (
   </div>
 );
 
-const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const ProtectedRoute: React.FC<{ children: React.ReactNode; withLayout?: boolean }> = ({
+  children,
+  withLayout = true,
+}) => {
   const { user, loading } = useAuth();
   const location = useLocation();
 
@@ -42,7 +46,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  return <AppLayout>{children}</AppLayout>;
+  return withLayout ? <AppLayout>{children}</AppLayout> : <>{children}</>;
 };
 
 export const App: React.FC = () => {
@@ -52,7 +56,6 @@ export const App: React.FC = () => {
         {/* Public Routes */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="/invitaciones/:token" element={<InvitationAccept />} />
 
         {/* Protected Routes */}
         <Route
@@ -68,6 +71,22 @@ export const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <ProjectDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/proyectos/:projectId/diagramas/:diagramId"
+          element={
+            <ProtectedRoute withLayout={false}>
+              <DiagramEditor />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/invitaciones"
+          element={
+            <ProtectedRoute>
+              <Invitations />
             </ProtectedRoute>
           }
         />

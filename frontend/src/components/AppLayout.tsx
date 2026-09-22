@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import type { Project } from '../types';
-import { FolderGit2, ShieldCheck, User as UserIcon, LogOut, Sparkles, SlidersHorizontal } from 'lucide-react';
+import { FolderGit2, ShieldCheck, User as UserIcon, LogOut, Sparkles, SlidersHorizontal, Mail } from 'lucide-react';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -49,6 +49,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       icon: FolderGit2,
       badge: projectCount !== null ? String(projectCount) : undefined,
     },
+    { to: '/invitaciones', label: 'Invitaciones', icon: Mail },
     { to: '/roles', label: 'Roles y Permisos', icon: ShieldCheck },
     { to: '/perfil', label: 'Mi Perfil', icon: UserIcon },
   ];
@@ -56,6 +57,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const getBreadcrumbTitle = () => {
     if (location.pathname.startsWith('/proyectos/')) return 'Detalle de Proyecto';
     if (location.pathname === '/proyectos') return 'Proyectos';
+    if (location.pathname === '/invitaciones') return 'Invitaciones';
     if (location.pathname === '/roles') return 'Roles y Permisos';
     if (location.pathname === '/perfil') return 'Mi Perfil';
     return 'Dashboard';
