@@ -188,3 +188,13 @@ export interface UMLMutationPayload {
   payload: Record<string, unknown>;
 }
 
+export interface GeneratedBackendCode {
+  diagram_id: number;
+  diagram_name: string;
+  classes_count: number;
+  relationships_count: number;
+  spring_boot: string;
+  sql: string;
+}
+
+

@@ -105,3 +105,109 @@ class DiagramMutationView(APIView):
             pass
 
         return Response(result, status=status.HTTP_200_OK)
+
+
+class DiagramGenerateBackendView(APIView):
+    """
+    Genera el código backend (Django models.py, SQL DDL, FastAPI) a partir del metamodelo UML 2.5.
+    Valida el permiso RBAC 'GENERATE_BACKEND' en el proyecto correspondiente.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from .codegen import BackendCodeGenerator
+
+        diagram = get_object_or_404(Diagram.objects.select_related('project'), pk=pk)
+
+        # Validar permiso de proyecto GENERATE_BACKEND
+        if not user_has_project_permission(request.user, diagram.project, 'GENERATE_BACKEND'):
+            raise PermissionDenied("No tienes el permiso 'GENERATE_BACKEND' para generar código de este proyecto.")
+
+        generated = BackendCodeGenerator.generate_all(
+            diagram.semantic_data or {},
+            diagram_name=diagram.name
+        )
+
+        return Response({
+            "diagram_id": diagram.id,
+            "diagram_name": diagram.name,
+            **generated
+        }, status=status.HTTP_200_OK)
+
+
+import io
+import zipfile
+import re
+from django.http import HttpResponse
+
+class DiagramDownloadZipView(APIView):
+    """
+    Empaqueta el código generado en un archivo ZIP descargable con la estructura
+    estándar de un proyecto Spring Boot y Maven.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from .codegen import BackendCodeGenerator
+
+        diagram = get_object_or_404(Diagram.objects.select_related('project'), pk=pk)
+
+        # Validar permiso de proyecto GENERATE_BACKEND
+        if not user_has_project_permission(request.user, diagram.project, 'GENERATE_BACKEND'):
+            raise PermissionDenied("No tienes el permiso 'GENERATE_BACKEND' para descargar código de este proyecto.")
+
+        generated = BackendCodeGenerator.generate_all(
+            diagram.semantic_data or {},
+            diagram_name=diagram.name
+        )
+
+        spring_boot_content = generated.get("spring_boot", "")
+        sql_content = generated.get("sql", "")
+
+        # Crear archivo ZIP en memoria
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            
+            # --- 1. schema.sql ---
+            zip_file.writestr("src/main/resources/schema.sql", sql_content)
+            
+            # --- 2. Parsear los archivos Java/properties a partir del string generado ---
+            # El motor usa el separador: // --- NombreArchivo ---
+            parts = re.split(r'// ---\s*(.+?)\s*---', spring_boot_content)
+            
+            for i in range(1, len(parts), 2):
+                filename = parts[i].strip()
+                file_content = parts[i+1].lstrip('\n')
+                
+                if filename == "pom.xml":
+                    zip_file.writestr("pom.xml", file_content)
+                elif filename == "application.properties":
+                    zip_file.writestr("src/main/resources/application.properties", file_content)
+                elif filename.endswith("Controller.java"):
+                    zip_file.writestr(f"src/main/java/com/example/controller/{filename}", file_content)
+                elif filename.endswith("Repository.java"):
+                    zip_file.writestr(f"src/main/java/com/example/repository/{filename}", file_content)
+                elif filename.endswith(".java"):
+                    zip_file.writestr(f"src/main/java/com/example/model/{filename}", file_content)
+
+            # --- 3. Agregar clase principal Application.java ---
+            app_java = (
+                "package com.example;\n\n"
+                "import org.springframework.boot.SpringApplication;\n"
+                "import org.springframework.boot.autoconfigure.SpringBootApplication;\n\n"
+                "@SpringBootApplication\n"
+                "public class Application {\n"
+                "    public static void main(String[] args) {\n"
+                "        SpringApplication.run(Application.class, args);\n"
+                "    }\n"
+                "}\n"
+            )
+            zip_file.writestr("src/main/java/com/example/Application.java", app_java)
+
+        zip_buffer.seek(0)
+
+        response = HttpResponse(zip_buffer, content_type='application/zip')
+        filename_safe = re.sub(r'[^a-zA-Z0-9_-]', '_', diagram.name) or "proyecto"
+        response['Content-Disposition'] = f'attachment; filename={filename_safe}_backend.zip'
+        return response
+

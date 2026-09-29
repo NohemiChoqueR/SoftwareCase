@@ -15,10 +15,12 @@ import type {
   UMLRelationshipType,
   UMLClass,
   UMLRelationship,
+  GeneratedBackendCode,
 } from '../types';
 import { UMLCanvas } from '../components/canvas/UMLCanvas';
 import { UMLToolbar, type CanvasTool } from '../components/canvas/UMLToolbar';
 import { UMLInspector } from '../components/canvas/UMLInspector';
+import { UMLCodeGeneratorModal } from '../components/canvas/UMLCodeGeneratorModal';
 import {
   ArrowLeft,
   Loader2,
@@ -27,6 +29,7 @@ import {
   SlidersHorizontal,
   Wifi,
   WifiOff,
+  Code2,
 } from 'lucide-react';
 
 export const DiagramEditor: React.FC = () => {
@@ -73,6 +76,13 @@ export const DiagramEditor: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Code Generation Modal State
+  const [isCodeGenOpen, setIsCodeGenOpen] = useState(false);
+  const [generatedCode, setGeneratedCode] = useState<GeneratedBackendCode | null>(null);
+  const [codeGenLoading, setCodeGenLoading] = useState(false);
+  const [codeGenError, setCodeGenError] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // WebSocket y Colaboración en Tiempo Real
   const [isWsConnected, setIsWsConnected] = useState(false);
@@ -250,6 +260,40 @@ export const DiagramEditor: React.FC = () => {
       socketService.disconnect();
     };
   }, [diagramId, token, user, loadDiagram]);
+
+  const handleDownloadZip = async () => {
+    if (!diagramId || !diagram) return;
+    try {
+      setIsDownloading(true);
+      const res = await api.get(`/diagramas/${diagramId}/download-backend/`, {
+        responseType: 'blob',
+      });
+      
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      
+      const contentDisposition = res.headers['content-disposition'];
+      let filename = `${diagram.name}_backend.zip`.replace(/[^a-zA-Z0-9_-]/g, '_');
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename=([^;]+)/);
+        if (filenameMatch && filenameMatch.length === 2) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error al descargar ZIP:', err);
+      alert('Error al descargar el proyecto. Verifica tus permisos y conexión.');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   // -------------------------------------------------------------
   // Helper for applying backend mutations
@@ -497,6 +541,34 @@ export const DiagramEditor: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  // -------------------------------------------------------------
+  // Backend Code Generation
+  // -------------------------------------------------------------
+  const fetchBackendCode = useCallback(async () => {
+    if (!diagramId) return;
+    try {
+      setCodeGenLoading(true);
+      setCodeGenError(null);
+      const response = await api.get<GeneratedBackendCode>(`/diagramas/${diagramId}/generate-backend/`);
+      setGeneratedCode(response.data);
+    } catch (err: unknown) {
+      console.error('Error al generar código backend:', err);
+      const errorObj = err as { response?: { data?: { error?: string; detail?: string } } };
+      setCodeGenError(
+        errorObj.response?.data?.error ||
+        errorObj.response?.data?.detail ||
+        'No se pudo generar el código backend. Verifica que tengas permisos en el proyecto.'
+      );
+    } finally {
+      setCodeGenLoading(false);
+    }
+  }, [diagramId]);
+
+  const handleOpenCodeGen = () => {
+    setIsCodeGenOpen(true);
+    void fetchBackendCode();
+  };
+
   const canvasVisualData = useMemo<UMLVisualData>(
     () => ({
       ...visualData,
@@ -697,7 +769,40 @@ export const DiagramEditor: React.FC = () => {
         </div>
 
         {/* Right Header Actions */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleOpenCodeGen}
+            title="Generar código Backend (Spring Boot JPA, PostgreSQL DDL)"
+            style={{ padding: '8px 14px', fontSize: '0.82rem', gap: '6px' }}
+          >
+            <Code2 size={15} aria-hidden="true" />
+            <span>Generar Backend</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleDownloadZip}
+            disabled={isDownloading}
+            title="Descargar proyecto Spring Boot completo (.zip)"
+            style={{
+              padding: '8px 14px',
+              fontSize: '0.82rem',
+              gap: '6px',
+              backgroundColor: 'var(--success-color, #10B981)',
+              borderColor: 'var(--success-color, #10B981)',
+            }}
+          >
+            {isDownloading ? (
+              <Loader2 size={15} className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Download size={15} aria-hidden="true" />
+            )}
+            <span>Descargar ZIP</span>
+          </button>
+
           <button
             type="button"
             className="btn btn-secondary"
@@ -769,6 +874,20 @@ export const DiagramEditor: React.FC = () => {
           onDeleteRelationship={handleDeleteRelationship}
         />
       </div>
+
+      {/* Backend Code Generator Modal */}
+      {diagram && (
+        <UMLCodeGeneratorModal
+          isOpen={isCodeGenOpen}
+          onClose={() => setIsCodeGenOpen(false)}
+          diagramId={diagram.id}
+          diagramName={diagram.name}
+          generatedCode={generatedCode}
+          loading={codeGenLoading}
+          error={codeGenError}
+          onRefresh={fetchBackendCode}
+        />
+      )}
     </div>
   );
 };

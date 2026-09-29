@@ -75,6 +75,7 @@ export const Register: React.FC = () => {
 
   return (
     <div
+      className="login-page-wrapper"
       style={{
         minHeight: '100vh',
         display: 'flex',

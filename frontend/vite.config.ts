@@ -25,20 +25,6 @@ export default defineConfig({
   },
   build: {
     target: 'baseline-widely-available',
-    chunkSizeWarningLimit: 600,
-    rollupOptions: {
-      output: {
-        manualChunks(id: string) {
-          if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
-              return 'vendor';
-            }
-            if (id.includes('lucide-react')) {
-              return 'icons';
-            }
-          }
-        },
-      },
-    },
+    chunkSizeWarningLimit: 1000,
   },
 })
