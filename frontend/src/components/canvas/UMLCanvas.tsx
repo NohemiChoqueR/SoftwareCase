@@ -391,16 +391,52 @@ export const UMLCanvas: React.FC<Props> = ({
           }}
         >
           <g style={{ pointerEvents: 'auto' }}>
-            {semanticData.relationships.map((rel) => (
-              <UMLRelationshipEdge
-                key={rel.id}
-                relationship={rel}
-                sourceNode={visualData.nodes[rel.source_id]}
-                targetNode={visualData.nodes[rel.target_id]}
-                isSelected={selectedElementType === 'edge' && selectedElementId === rel.id}
-                onSelect={(id) => onSelectElement(id, 'edge')}
-              />
-            ))}
+            {(() => {
+              const edgeMidpoints: Record<string, { x: number; y: number }> = {};
+              semanticData.relationships.forEach((rel) => {
+                if (rel.type !== 'association_class') {
+                  const s = visualData.nodes[rel.source_id];
+                  const t = visualData.nodes[rel.target_id];
+                  if (s && t) {
+                    const sx = s.x + s.width / 2;
+                    const sy = s.y + s.height / 2;
+                    const tx = t.x + t.width / 2;
+                    const ty = t.y + t.height / 2;
+                    edgeMidpoints[rel.id] = { x: (sx + tx) / 2, y: (sy + ty) / 2 };
+                  }
+                }
+              });
+
+              return semanticData.relationships.map((rel) => {
+                const sourceNode = visualData.nodes[rel.source_id];
+                let targetNode = visualData.nodes[rel.target_id];
+
+                if (!targetNode && rel.type === 'association_class') {
+                  const mid = edgeMidpoints[rel.target_id];
+                  if (mid) {
+                    targetNode = { x: mid.x, y: mid.y, width: 0, height: 0 };
+                  }
+                }
+
+                return (
+                  <UMLRelationshipEdge
+                    key={rel.id}
+                    relationship={rel}
+                    sourceNode={sourceNode}
+                    targetNode={targetNode}
+                    isSelected={selectedElementType === 'edge' && selectedElementId === rel.id}
+                    isConnectingTarget={
+                      connectingSourceId !== null &&
+                      connectingSourceId !== rel.id &&
+                      activeTool === 'connect' &&
+                      selectedRelType === 'association_class'
+                    }
+                    onSelect={(id) => onSelectElement(id, 'edge')}
+                    onCompleteConnection={handleCompleteConnection}
+                  />
+                );
+              });
+            })()}
 
             {/* Connecting line preview */}
             {sourceConnectingNode && connectPointerPos && (

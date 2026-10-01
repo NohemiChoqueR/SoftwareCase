@@ -283,6 +283,42 @@ def _preanalyze_relationships(
     y exactamente una FK SQL (en el lado correcto).
     """
     class_by_id: Dict[str, dict] = {c["id"]: c for c in classes if c.get("id")}
+    rel_by_id: Dict[str, dict] = {r["id"]: r for r in relationships if r.get("id")}
+
+    # ── Pre-procesar Clases de Asociación ──────────────────────────────
+    rewritten_rels = []
+    suppressed_rels = set()
+    for rel in relationships:
+        if rel.get("type") == "association_class":
+            assoc_class_id = rel.get("source_id")
+            target_rel_id = rel.get("target_id")
+            
+            if assoc_class_id in class_by_id and target_rel_id in rel_by_id:
+                tgt_rel = rel_by_id[target_rel_id]
+                suppressed_rels.add(target_rel_id)
+                
+                # Crear dos ManyToOne desde la clase intermedia hacia los extremos
+                rel1 = {
+                    "id": f"{rel.get('id', 'r')}_1",
+                    "type": "association",
+                    "source_id": assoc_class_id,
+                    "target_id": tgt_rel.get("source_id"),
+                    "source_multiplicity": "*",
+                    "target_multiplicity": "1",
+                    "name": tgt_rel.get("source_role")
+                }
+                rel2 = {
+                    "id": f"{rel.get('id', 'r')}_2",
+                    "type": "association",
+                    "source_id": assoc_class_id,
+                    "target_id": tgt_rel.get("target_id"),
+                    "source_multiplicity": "*",
+                    "target_multiplicity": "1",
+                    "name": tgt_rel.get("target_role")
+                }
+                rewritten_rels.extend([rel1, rel2])
+    
+    active_relationships = [r for r in relationships if r.get("id") not in suppressed_rels and r.get("type") != "association_class"] + rewritten_rels
 
     parent_map: Dict[str, str] = {}       # child_id → parent class name (PascalCase)
     parent_is_abstract: Dict[str, bool] = {}
@@ -335,7 +371,7 @@ def _preanalyze_relationships(
                 "is_custom": False
             }
 
-    for rel in relationships:
+    for rel in active_relationships:
         rtype   = rel.get("type", "")
         src_id  = rel.get("source_id", "")
         tgt_id  = rel.get("target_id", "")
@@ -821,12 +857,13 @@ class BackendCodeGenerator:
             lines.append("}")
             sections.append("\n".join(lines))
 
-            # ── Repository y Controller (solo clases concretas — R-C6) ───
+            # ── Repository, Service y Controller (solo clases concretas — R-C6) ───
             if not is_abstract:
                 my_pk = pk_info.get(cid, {})
                 pk_jtype = my_pk.get("java_type", "Long")
                 pk_jname = my_pk.get("name", "id")
                 sections.append(cls._gen_repository(class_name, pk_jtype))
+                sections.append(cls._gen_service(class_name, pk_jtype))
                 sections.append(cls._gen_controller(class_name, pk_jtype, pk_jname))
 
         return "\n\n".join(sections).strip() + "\n"
@@ -881,9 +918,52 @@ class BackendCodeGenerator:
         ])
 
     @classmethod
+    def _gen_service(cls, class_name: str, pk_type: str = "Long") -> str:
+        field = to_camel_case(class_name)
+        repo = f"{field}Repository"
+        return "\n".join([
+            f"// --- {class_name}Service.java ---",
+            "package com.example.service;\n",
+            f"import com.example.model.{class_name};",
+            f"import com.example.repository.{class_name}Repository;",
+            "import org.springframework.stereotype.Service;",
+            "import java.util.List;",
+            "import java.util.Optional;\n",
+            "@Service",
+            f"public class {class_name}Service {{",
+            "",
+            f"    private final {class_name}Repository {repo};",
+            "",
+            f"    public {class_name}Service({class_name}Repository {repo}) {{",
+            f"        this.{repo} = {repo};",
+            "    }",
+            "",
+            f"    public List<{class_name}> findAll() {{",
+            f"        return {repo}.findAll();",
+            "    }",
+            "",
+            f"    public Optional<{class_name}> findById({pk_type} id) {{",
+            f"        return {repo}.findById(id);",
+            "    }",
+            "",
+            f"    public {class_name} save({class_name} entity) {{",
+            f"        return {repo}.save(entity);",
+            "    }",
+            "",
+            f"    public boolean existsById({pk_type} id) {{",
+            f"        return {repo}.existsById(id);",
+            "    }",
+            "",
+            f"    public void deleteById({pk_type} id) {{",
+            f"        {repo}.deleteById(id);",
+            "    }",
+            "}",
+        ])
+
+    @classmethod
     def _gen_controller(cls, class_name: str, pk_type: str = "Long", pk_name: str = "id") -> str:
         field    = to_camel_case(class_name)
-        repo     = f"{field}Repository"
+        svc      = f"{field}Service"
         tbl      = table_name_for(class_name)
         id_path  = "/{id}"
         setter_name = "set" + pk_name[0].upper() + pk_name[1:]
@@ -891,7 +971,7 @@ class BackendCodeGenerator:
             f"// --- {class_name}Controller.java ---",
             "package com.example.controller;\n",
             f"import com.example.model.{class_name};",
-            f"import com.example.repository.{class_name}Repository;",
+            f"import com.example.service.{class_name}Service;",
             "import org.springframework.http.ResponseEntity;",
             "import org.springframework.web.bind.annotation.*;",
             "import java.util.List;\n",
@@ -899,43 +979,43 @@ class BackendCodeGenerator:
             f'@RequestMapping("/api/{tbl}")',
             f"public class {class_name}Controller {{",
             "",
-            f"    private final {class_name}Repository {repo};",
+            f"    private final {class_name}Service {svc};",
             "",
-            f"    public {class_name}Controller({class_name}Repository {repo}) {{",
-            f"        this.{repo} = {repo};",
+            f"    public {class_name}Controller({class_name}Service {svc}) {{",
+            f"        this.{svc} = {svc};",
             "    }",
             "",
             f"    // GET  /api/{tbl}",
             "    @GetMapping",
             f"    public List<{class_name}> findAll() {{",
-            f"        return {repo}.findAll();",
+            f"        return {svc}.findAll();",
             "    }",
             "",
             f"    // GET  /api/{tbl}/:id",
             '    @GetMapping("/{id}")',
             f"    public ResponseEntity<{class_name}> findById(@PathVariable {pk_type} id) {{",
-            f"        return {repo}.findById(id).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());",
+            f"        return {svc}.findById(id).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());",
             "    }",
             "",
             f"    // POST /api/{tbl}",
             "    @PostMapping",
             f"    public {class_name} create(@RequestBody {class_name} entity) {{",
-            f"        return {repo}.save(entity);",
+            f"        return {svc}.save(entity);",
             "    }",
             "",
             f"    // PUT  /api/{tbl}/:id",
             '    @PutMapping("/{id}")',
             f"    public ResponseEntity<{class_name}> update(@PathVariable {pk_type} id, @RequestBody {class_name} entity) {{",
-            f"        if (!{repo}.existsById(id)) return ResponseEntity.notFound().build();",
+            f"        if (!{svc}.existsById(id)) return ResponseEntity.notFound().build();",
             f"        entity.{setter_name}(id);",
-            f"        return ResponseEntity.ok({repo}.save(entity));",
+            f"        return ResponseEntity.ok({svc}.save(entity));",
             "    }",
             "",
             f"    // DELETE /api/{tbl}/:id",
             '    @DeleteMapping("/{id}")',
             f"    public ResponseEntity<Void> delete(@PathVariable {pk_type} id) {{",
-            f"        if (!{repo}.existsById(id)) return ResponseEntity.notFound().build();",
-            f"        {repo}.deleteById(id);",
+            f"        if (!{svc}.existsById(id)) return ResponseEntity.notFound().build();",
+            f"        {svc}.deleteById(id);",
             "        return ResponseEntity.noContent().build();",
             "    }",
             "}",

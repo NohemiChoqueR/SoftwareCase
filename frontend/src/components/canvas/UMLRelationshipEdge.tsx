@@ -6,7 +6,11 @@ interface Props {
   sourceNode?: UMLVisualNode;
   targetNode?: UMLVisualNode;
   isSelected: boolean;
+  isConnectingTarget?: boolean;
   onSelect: (relId: string) => void;
+  onCompleteConnection?: (relId: string) => void;
+  onMouseEnterConnection?: () => void;
+  onMouseLeaveConnection?: () => void;
 }
 
 interface Point {
@@ -54,7 +58,11 @@ export const UMLRelationshipEdge: React.FC<Props> = ({
   sourceNode,
   targetNode,
   isSelected,
+  isConnectingTarget,
   onSelect,
+  onCompleteConnection,
+  onMouseEnterConnection,
+  onMouseLeaveConnection,
 }) => {
   if (!sourceNode || !targetNode) return null;
 
@@ -71,7 +79,7 @@ export const UMLRelationshipEdge: React.FC<Props> = ({
   const start = getIntersectionPoint(sourceNode, targetCenter);
   const end = getIntersectionPoint(targetNode, sourceCenter);
 
-  const isDashed = relationship.type === 'realization' || relationship.type === 'dependency';
+  const isDashed = relationship.type === 'realization' || relationship.type === 'dependency' || relationship.type === 'association_class';
 
   // Marker ID para el tipo de relación
   let markerEnd = '';
@@ -106,7 +114,10 @@ export const UMLRelationshipEdge: React.FC<Props> = ({
   const tgtMultX = end.x - (end.x - start.x) * 0.18;
   const tgtMultY = end.y - (end.y - start.y) * 0.18 - 8;
 
-  const strokeColor = isSelected ? 'var(--primary)' : 'var(--primary)';
+  let strokeColor = isSelected ? 'var(--primary)' : 'var(--primary)';
+  if (isConnectingTarget) {
+    strokeColor = '#4ADE80'; // highlight when hovering to connect
+  }
 
   return (
     <g
@@ -114,6 +125,14 @@ export const UMLRelationshipEdge: React.FC<Props> = ({
         e.stopPropagation();
         onSelect(relationship.id);
       }}
+      onMouseUp={(e) => {
+        if (onCompleteConnection) {
+          e.stopPropagation();
+          onCompleteConnection(relationship.id);
+        }
+      }}
+      onMouseEnter={onMouseEnterConnection}
+      onMouseLeave={onMouseLeaveConnection}
       onClick={(e) => {
         e.stopPropagation();
         onSelect(relationship.id);

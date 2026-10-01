@@ -36,6 +36,7 @@ const RELATIONSHIP_OPTIONS: { type: UMLRelationshipType; label: string; symbol: 
   { type: 'aggregation', label: 'Agregación', symbol: '──◇' },
   { type: 'composition', label: 'Composición', symbol: '──◆' },
   { type: 'dependency', label: 'Dependencia', symbol: '┈┈>' },
+  { type: 'association_class', label: 'Clase de Asoc.', symbol: '┈┈-' },
 ];
 
 export const UMLToolbar: React.FC<Props> = ({

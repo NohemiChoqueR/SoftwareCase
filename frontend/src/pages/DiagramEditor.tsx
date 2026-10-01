@@ -459,6 +459,88 @@ export const DiagramEditor: React.FC = () => {
     targetId: string,
     type: UMLRelationshipType
   ) => {
+    // MACRO: Si el usuario arrastra de una Clase A a una Clase B con "Clase de Asoc."
+    if (type === 'association_class' && visualData.nodes[targetId]) {
+      const baseRelId = `rel-${Math.random().toString(36).substring(2, 9)}`;
+      const baseRel: UMLRelationship = {
+        id: baseRelId,
+        type: 'association',
+        source_id: sourceId,
+        target_id: targetId,
+        name: '',
+        source_multiplicity: '*',
+        target_multiplicity: '*',
+      };
+
+      const classId = `node-${Math.random().toString(36).substring(2, 9)}`;
+      const sourceNode = visualData.nodes[sourceId];
+      const targetNode = visualData.nodes[targetId];
+      const midX = sourceNode && targetNode ? (sourceNode.x + targetNode.x) / 2 : 100;
+      const midY = sourceNode && targetNode ? (sourceNode.y + targetNode.y) / 2 + 150 : 100;
+
+      const newClass: UMLClass = {
+        id: classId,
+        name: 'ClaseIntermedia',
+        is_abstract: false,
+        is_interface: false,
+        attributes: [],
+        methods: [],
+      };
+
+      const dashedRelId = `rel-${Math.random().toString(36).substring(2, 9)}`;
+      const dashedRel: UMLRelationship = {
+        id: dashedRelId,
+        type: 'association_class',
+        source_id: classId,
+        target_id: baseRelId,
+        name: '',
+      };
+
+      setSemanticData((prev) => ({
+        ...prev,
+        classes: [...prev.classes, newClass],
+        relationships: [...prev.relationships, baseRel, dashedRel],
+      }));
+
+      setVisualData((prev) => ({
+        ...prev,
+        nodes: {
+          ...prev.nodes,
+          [classId]: { x: midX, y: midY, width: 230, height: 120 },
+        },
+      }));
+
+      handleSelectElement(classId, 'node');
+      setActiveTool('select');
+
+      await sendMutation('ADD_NODE', {
+        id: classId,
+        name: newClass.name,
+        is_abstract: newClass.is_abstract,
+        is_interface: newClass.is_interface,
+        position: { x: midX, y: midY },
+        size: { width: 230, height: 120 },
+      });
+
+      await sendMutation('ADD_RELATIONSHIP', {
+        id: baseRelId,
+        type: baseRel.type,
+        source_id: baseRel.source_id,
+        target_id: baseRel.target_id,
+        source_multiplicity: baseRel.source_multiplicity,
+        target_multiplicity: baseRel.target_multiplicity,
+      });
+
+      await sendMutation('ADD_RELATIONSHIP', {
+        id: dashedRelId,
+        type: dashedRel.type,
+        source_id: dashedRel.source_id,
+        target_id: dashedRel.target_id,
+      });
+
+      return;
+    }
+
     const relId = `rel-${Math.random().toString(36).substring(2, 9)}`;
 
     const newRel: UMLRelationship = {

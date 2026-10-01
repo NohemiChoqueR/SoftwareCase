@@ -9,6 +9,7 @@ VALID_RELATIONSHIP_TYPES = {
     'aggregation',
     'composition',
     'dependency',
+    'association_class',
 }
 
 VALID_VISIBILITIES = {'public', 'private', 'protected', 'package', '+', '-', '#', '~'}
@@ -211,8 +212,14 @@ class UMLMutationEngine:
 
         if not any(c['id'] == source_id for c in classes):
             raise ValidationError(f"El nodo origen con ID '{source_id}' no existe en el diagrama.")
-        if not any(c['id'] == target_id for c in classes):
-            raise ValidationError(f"El nodo destino con ID '{target_id}' no existe en el diagrama.")
+        
+        if rel_type == 'association_class':
+            target_exists = any(r['id'] == target_id for r in relationships) or any(c['id'] == target_id for c in classes)
+        else:
+            target_exists = any(c['id'] == target_id for c in classes)
+
+        if not target_exists:
+            raise ValidationError(f"El nodo/arista destino con ID '{target_id}' no existe en el diagrama.")
 
         new_rel = {
             "id": rel_id,

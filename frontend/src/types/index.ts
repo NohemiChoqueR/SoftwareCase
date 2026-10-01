@@ -82,7 +82,8 @@ export type UMLRelationshipType =
   | 'association'
   | 'aggregation'
   | 'composition'
-  | 'dependency';
+  | 'dependency'
+  | 'association_class';
 
 export interface UMLAttribute {
   id: string;
